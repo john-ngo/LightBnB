@@ -104,15 +104,64 @@ exports.getAllReservations = getAllReservations;
  * @return {Promise<[{}]>}  A promise to the properties.
  */
 const getAllProperties = (options, limit = 10) => {
-  return pool
-    .query(`SELECT * FROM properties LIMIT $1`, [limit])
-    .then((result) => {
-      console.log(result.rows);
-      return result.rows;
-    })
-    .catch((err) => {
-      console.log(err.message);
-    });
+  const queryParams = [];
+  let and = false;
+  let queryString = `
+    SELECT properties.*, avg(property_reviews.rating) as average_rating
+    FROM properties
+    JOIN property_reviews ON properties.id = property_id
+  `;
+
+  for (const key in options) {
+    if (options[key] && key !== 'minimum_rating') {
+      if (and) {
+        queryString += `AND `
+      } else {
+        queryString += `WHERE `
+        and = true;
+      }
+
+      switch (key) {
+        case 'city':
+          queryParams.push(`%${options.city}%`);
+          queryString += `city LIKE $${queryParams.length} `;
+          break;
+        case 'owner_id':
+          queryParams.push(`${options.owner_id}`);
+          queryString += `owner_id = $${queryParams.length} `;
+          break;
+        case 'minimum_price_per_night':
+          queryParams.push(`${options.minimum_price_per_night}`);
+          queryString += `cost_per_night / 100 >= $${queryParams.length} `;
+          break;
+        case 'maximum_price_per_night':
+          queryParams.push(`${options.maximum_price_per_night}`);
+          queryString += `cost_per_night / 100 <= $${queryParams.length} `;
+          break;
+      }
+    }
+  }
+
+  queryString += `
+    GROUP BY properties.id
+  `;
+
+  if (options.minimum_rating) {
+    queryParams.push(`${options.minimum_rating}`);
+    queryString += `
+      HAVING avg(property_reviews.rating) >= $${queryParams.length}
+    `;
+  }
+
+  queryParams.push(limit);
+  queryString += `
+    ORDER BY cost_per_night
+    LIMIT $${queryParams.length};
+  `;
+
+  console.log(queryString, queryParams);
+
+  return pool.query(queryString, queryParams).then((res) => res.rows);
 };
 exports.getAllProperties = getAllProperties;
 
